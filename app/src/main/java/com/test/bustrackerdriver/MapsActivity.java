@@ -1,27 +1,42 @@
 package com.test.bustrackerdriver;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.location.Location;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
+import android.util.Log;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 
 import com.firebase.geofire.GeoFire;
 import com.firebase.geofire.GeoLocation;
 import com.firebase.geofire.GeoQuery;
 import com.firebase.geofire.GeoQueryEventListener;
+import com.google.android.gms.appindexing.Action;
+import com.google.android.gms.appindexing.AppIndex;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationCallback;
 import com.google.android.gms.location.LocationRequest;
@@ -31,10 +46,17 @@ import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.CircleOptions;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.maps.model.Polyline;
+import com.google.android.gms.maps.model.PolylineOptions;
+import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseError;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -47,12 +69,21 @@ import com.karumi.dexter.listener.PermissionGrantedResponse;
 import com.karumi.dexter.listener.PermissionRequest;
 import com.karumi.dexter.listener.single.PermissionListener;
 import com.test.bustrackerdriver.Interface.IOnLoadLocationListener;
+import com.test.bustrackerdriver.POJO.Example;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-public class MapsActivity extends FragmentActivity implements OnMapReadyCallback, GeoQueryEventListener, IOnLoadLocationListener {
+import retrofit.Call;
+import retrofit.Callback;
+import retrofit.GsonConverterFactory;
+import retrofit.Response;
+import retrofit.Retrofit;
+
+public class MapsActivity extends FragmentActivity implements OnMapReadyCallback,
+        GeoQueryEventListener,
+        IOnLoadLocationListener{
 
     private GoogleMap mMap;
     private LocationRequest locationRequest;
@@ -63,6 +94,12 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private GeoFire geoFire;
     private List<LatLng> busStop;
     private IOnLoadLocationListener listener;
+    LatLng origin;
+    LatLng dest;
+    ArrayList<LatLng> MarkerPoints;
+    TextView ShowDistanceDuration;
+    Polyline line;
+    private Button logout,mylocation;
 
     private DatabaseReference myBusStop;
     private Location lastLocation;
@@ -72,6 +109,47 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
+
+
+        mylocation=findViewById(R.id.mylocation);
+
+        mylocation.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                addUserMarker();
+            }
+        });
+
+//        logout=findViewById(R.id.logout);
+//        logout.setOnClickListener(new View.OnClickListener() {
+//            @Override
+//            public void onClick(View v) {
+//                Intent intent = new Intent(MapsActivity.this, LoginActivity.class);
+//                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+//                SharedPreferences sharedPreferences = MapsActivity.this.getSharedPreferences("Jane", Context.MODE_PRIVATE);
+//                SharedPreferences.Editor edit = sharedPreferences.edit();
+//                edit.clear().commit();
+//                startActivity(intent);
+//            }
+//        });
+
+        ShowDistanceDuration = findViewById(R.id.show_distance_time);
+
+        if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            checkLocationPermission();
+        }
+
+        // Initializing
+        MarkerPoints = new ArrayList<>();
+
+        //show error dialog if Google Play Services not available
+        if (!isGooglePlayServicesAvailable()) {
+            Log.d("onCreate", "Google Play Services not available. Ending Test case.");
+            finish();
+        }
+        else {
+            Log.d("onCreate", "Google Play Services available. Continuing.");
+        }
 
         Dexter.withActivity(this)
                 .withPermission(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -223,9 +301,198 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     return;
                 }
             }
+        assert fusedLocationProviderClient != null;
         fusedLocationProviderClient.requestLocationUpdates(locationRequest,locationCallback,Looper.myLooper());
 
         addCirleArea();
+
+        mMap.setOnMapClickListener(new GoogleMap.OnMapClickListener() {
+
+            @Override
+            public void onMapClick(LatLng point) {
+
+                // clearing map and generating new marker points if user clicks on map more than two times
+                if (MarkerPoints.size() > 1) {
+                    mMap.clear();
+                    MarkerPoints.clear();
+                    MarkerPoints = new ArrayList<>();
+                    ShowDistanceDuration.setText("");
+                }
+
+                // Adding new item to the ArrayList
+                MarkerPoints.add(point);
+
+                // Creating MarkerOptions
+                MarkerOptions options = new MarkerOptions();
+
+                // Setting the position of the marker
+                options.position(point);
+
+                if (MarkerPoints.size() == 1) {
+                    options.icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)).title("Start");
+                } else if (MarkerPoints.size() == 2) {
+                    options.icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)).title("End");
+                }
+
+
+                // Add new marker to the Google Map Android API V2
+                mMap.addMarker(options);
+
+                // Checks, whether start and end locations are captured
+                if (MarkerPoints.size() >= 2) {
+                    origin = MarkerPoints.get(0);
+                    dest = MarkerPoints.get(1);
+                }
+
+            }
+        });
+
+        Button btnDriving = findViewById(R.id.btnDriving);
+        btnDriving.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                build_retrofit_and_get_response("driving");
+            }
+        });
+
+        Button btnWalk = findViewById(R.id.btnWalk);
+        btnWalk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                build_retrofit_and_get_response("walking");
+            }
+        });
+    }
+
+
+    private void build_retrofit_and_get_response(String type) {
+
+        String url = "https://maps.googleapis.com/maps/";
+
+        Retrofit retrofit = new Retrofit.Builder()
+                .baseUrl(url)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build();
+
+        RetrofitMaps service = retrofit.create(RetrofitMaps.class);
+
+        Call<Example> call = service.getDistanceDuration("metric", origin.latitude + "," + origin.longitude,dest.latitude + "," + dest.longitude, type);
+
+        call.enqueue(new Callback<Example>() {
+            @SuppressLint("SetTextI18n")
+            @Override
+            public void onResponse(Response<Example> response, Retrofit retrofit) {
+
+                try {
+                    //Remove previous line from map
+                    if (line != null) {
+                        line.remove();
+                    }
+                    // This loop will go through all the results and add marker on each location.
+                    for (int i = 0; i < response.body().getRoutes().size(); i++) {
+                        String distance = response.body().getRoutes().get(i).getLegs().get(i).getDistance().getText();
+                        String time = response.body().getRoutes().get(i).getLegs().get(i).getDuration().getText();
+                        ShowDistanceDuration.setText("Distance:" + distance + ", Duration:" + time);
+                        String encodedString = response.body().getRoutes().get(0).getOverviewPolyline().getPoints();
+                        List<LatLng> list = decodePoly(encodedString);
+                        line = mMap.addPolyline(new PolylineOptions()
+                                .addAll(list)
+                                .width(20)
+                                .color(Color.RED)
+                                .geodesic(true)
+                        );
+                    }
+                } catch (Exception e) {
+                    Log.d("onResponse", "There is an error");
+                    e.printStackTrace();
+                }
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                Log.d("onFailure", t.toString());
+            }
+        });
+
+    }
+
+    private List<LatLng> decodePoly(String encoded) {
+        List<LatLng> poly = new ArrayList<>();
+        int index = 0, len = encoded.length();
+        int lat = 0, lng = 0;
+
+        while (index < len) {
+            int b, shift = 0, result = 0;
+            do {
+                b = encoded.charAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+            do {
+                b = encoded.charAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+            lng += dlng;
+
+            LatLng p = new LatLng( (((double) lat / 1E5)),
+                    (((double) lng / 1E5) ));
+            poly.add(p);
+        }
+
+        return poly;
+    }
+
+    // Checking if Google Play Services Available or not
+    private boolean isGooglePlayServicesAvailable() {
+        GoogleApiAvailability googleAPI = GoogleApiAvailability.getInstance();
+        int result = googleAPI.isGooglePlayServicesAvailable(this);
+        if(result != ConnectionResult.SUCCESS) {
+            if(googleAPI.isUserResolvableError(result)) {
+                googleAPI.getErrorDialog(this, result,
+                        0).show();
+            }
+            return false;
+        }
+        return true;
+    }
+
+    public static final int MY_PERMISSIONS_REQUEST_LOCATION = 99;
+    public boolean checkLocationPermission(){
+        if (ContextCompat.checkSelfPermission(this,
+                Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+
+            // Asking user if explanation is needed
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this,
+                    Manifest.permission.ACCESS_FINE_LOCATION)) {
+
+                // Show an explanation to the user *asynchronously* -- don't block
+                // this thread waiting for the user's response! After the user
+                // sees the explanation, try again to request the permission.
+
+                //Prompt the user once explanation has been shown
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                        MY_PERMISSIONS_REQUEST_LOCATION);
+
+
+            } else {
+                // No explanation needed, we can request the permission.
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                        MY_PERMISSIONS_REQUEST_LOCATION);
+            }
+            return false;
+        } else {
+            return true;
+        }
     }
 
     private void addCirleArea() {
@@ -235,13 +502,13 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         }
         for (LatLng latLng:busStop){
             mMap.addCircle(new CircleOptions().center(latLng)
-                    .radius(5.0f)
+                    .radius(15.0f)
                     .strokeColor(Color.BLUE)
                     .fillColor(0x220000FF)
                     .strokeWidth(5.0f)
             );
 
-            geoquery = geoFire.queryAtLocation(new GeoLocation((latLng.latitude),latLng.longitude),0.1f);
+            geoquery = geoFire.queryAtLocation(new GeoLocation((latLng.latitude),latLng.longitude),0.01f);
             geoquery.addGeoQueryEventListener(MapsActivity.this);
 
         }
@@ -255,18 +522,68 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     @Override
     public void onKeyEntered(String key, GeoLocation location) {
-        //Toast.makeText(this,"You entered the bus stop area",Toast.LENGTH_LONG).show();
-        sendNotification("Wilson",String.format("%s entered the bus stop area",key));
+
+//            final DatabaseReference ref = FirebaseDatabase.getInstance()
+//                    .getReference("BusStopArea")
+//                    .child("BusStop")
+//                    .child("Library");
+//            ref.addValueEventListener(new ValueEventListener() {
+//                @Override
+//                public void onDataChange(DataSnapshot dataSnapshot) {
+//                    //int count = (int) dataSnapshot.child("StudentNo").getValue();
+//                    ref.child("StudentNo").setValue(22);
+//                }
+//                @Override
+//                public void onCancelled(@NonNull DatabaseError databaseError) {
+//
+//                }
+//            });
+
+        FirebaseDatabase.getInstance()
+                .getReference("BusStopArea")
+                .child("BusStop")
+                .child("Library")
+                .child("StudentNo")
+                .setValue(1)
+                .addOnCompleteListener(new OnCompleteListener<Void>() {
+                    @Override
+                    public void onComplete(@NonNull Task<Void> task) {
+
+                    }
+                }).addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Toast.makeText(MapsActivity.this,""+e.getMessage(),Toast.LENGTH_SHORT).show();
+            }
+        });
+        sendNotification("Jane",String.format("%s entered the bus stop area",key));
     }
 
     @Override
     public void onKeyExited(String key) {
-        sendNotification("Wilson",String.format("%s exited the bus stop area",key));
+        FirebaseDatabase.getInstance()
+                .getReference("BusStopArea")
+                .child("BusStop")
+                .child("Library")
+                .child("StudentNo")
+                .setValue(-1)
+                .addOnCompleteListener(new OnCompleteListener<Void>() {
+                    @Override
+                    public void onComplete(@NonNull Task<Void> task) {
+
+                    }
+                }).addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Toast.makeText(MapsActivity.this,""+e.getMessage(),Toast.LENGTH_SHORT).show();
+            }
+        });
+        sendNotification("Jane",String.format("%s exited the bus stop area",key));
     }
 
     @Override
     public void onKeyMoved(String key, GeoLocation location) {
-        sendNotification("Wilson",String.format("%s move within the bus stop area",key));
+        sendNotification("Jane",String.format("%s move within the bus stop area",key));
     }
 
     @Override
@@ -282,7 +599,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private void sendNotification(String title, String content) {
 
         Toast.makeText(this, ""+content, Toast.LENGTH_SHORT).show();
-        String NOTIFICATION_CHANNEL_ID="wilson_multiple_location";
+        String NOTIFICATION_CHANNEL_ID="jane_multiple_location";
         NotificationManager notificationManager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
 
         if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)
@@ -295,6 +612,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             notificationChannel.setLightColor(Color.RED);
             notificationChannel.setVibrationPattern(new long [] {0,1000,500,1000});
             notificationChannel.enableVibration(true);
+            assert notificationManager != null;
             notificationManager.createNotificationChannel(notificationChannel);
         }
 
@@ -306,6 +624,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 .setLargeIcon(BitmapFactory.decodeResource(getResources(),R.mipmap.ic_launcher));
 
         Notification notification=builder.build();
+        assert notificationManager != null;
         notificationManager.notify(new Random().nextInt(),notification);
     }
 
@@ -321,6 +640,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
+        assert mapFragment != null;
         mapFragment.getMapAsync(MapsActivity.this);
 
         if (mMap!=null){

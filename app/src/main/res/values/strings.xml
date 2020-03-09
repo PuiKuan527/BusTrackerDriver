@@ -1,5 +1,5 @@
 <resources>
-        <string name="title_activity_maps">Bus Tracker - Driver</string>
+        <string name="title_activity_maps">Bus Tracker</string>
 
         <!--    Login Activity-->
         <string name="minimum_password">Password too short, enter minimum 6 characters</string>
@@ -8,5 +8,9 @@
         <!--    Reset Password Activity-->
         <string name="btn_back"><![CDATA[<< Back]]></string>
         <string name="forgot_password_msg">Enter your email and we will send you a code to get back into your account.</string>
+
+        <!--    Button-->
+        <string name="btnDriving">Driving mode</string>
+        <string name="btnWalk">Walking Mode</string>
 
     </resources>
