@@ -1,7 +1,6 @@
 package com.test.bustrackerdriver;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -57,6 +56,8 @@ import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.Task;
 import com.google.firebase.FirebaseError;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -93,6 +94,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private DatabaseReference myLocationRef;
     private GeoFire geoFire;
     private List<LatLng> busStop;
+    private List<LatLng> driver;
     private IOnLoadLocationListener listener;
     LatLng origin;
     LatLng dest;
@@ -100,16 +102,31 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     TextView ShowDistanceDuration;
     Polyline line;
     private Button logout,mylocation;
+    final FirebaseUser user1 = FirebaseAuth.getInstance().getCurrentUser();
 
-    private DatabaseReference myBusStop;
+    private DatabaseReference myBusStop,mydriver;
     private Location lastLocation;
     private GeoQuery geoquery;
+    DatabaseReference databaseReference;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
 
+        databaseReference = FirebaseDatabase.getInstance().getReference("BusStopArea").child("BusStop");
+
+        databaseReference.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                Student student = dataSnapshot.child("Library").getValue(Student.class);
+                int num=student.getStudentNo()+1;
+            }
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+
+            }
+        });
 
         mylocation=findViewById(R.id.mylocation);
 
@@ -120,20 +137,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             }
         });
 
-//        logout=findViewById(R.id.logout);
-//        logout.setOnClickListener(new View.OnClickListener() {
-//            @Override
-//            public void onClick(View v) {
-//                Intent intent = new Intent(MapsActivity.this, LoginActivity.class);
-//                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-//                SharedPreferences sharedPreferences = MapsActivity.this.getSharedPreferences("Jane", Context.MODE_PRIVATE);
-//                SharedPreferences.Editor edit = sharedPreferences.edit();
-//                edit.clear().commit();
-//                startActivity(intent);
-//            }
-//        });
-
-        ShowDistanceDuration = findViewById(R.id.show_distance_time);
+        ShowDistanceDuration = (TextView) findViewById(R.id.show_distance_time);
 
         if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             checkLocationPermission();
@@ -163,6 +167,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                         fusedLocationProviderClient= LocationServices.getFusedLocationProviderClient(MapsActivity.this);
 
                         initArea();
+                        //initArea1();
                         settingGeoFire();
                     }
 
@@ -185,23 +190,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 .child("BusStop");
         listener=this;
 
-
-//                myBusStop.addListenerForSingleValueEvent(new ValueEventListener() {
-//                    @Override
-//                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-//                        List<MyLatLng> latLngList = new ArrayList<>();
-//                        for (DataSnapshot locationSnapShot: dataSnapshot.getChildren()){
-//                            MyLatLng latLng = locationSnapShot.getValue(MyLatLng.class);
-//                            latLngList.add(latLng);
-//                        }
-//                        listener.OnLoadLocationSuccess(latLngList);
-//                    }
-//
-//                    @Override
-//                    public void onCancelled(@NonNull DatabaseError databaseError) {
-//                        listener.OnLoadLocationFailed(databaseError.getMessage());
-//                    }
-//                });
         myBusStop.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
@@ -210,37 +198,36 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     MyLatLng latLng = locationSnapShot.getValue(MyLatLng.class);
                     latLngList.add(latLng);
                 }
-
                 listener.OnLoadLocationSuccess(latLngList);
-
-
             }
-
             @Override
             public void onCancelled(@NonNull DatabaseError databaseError) {
 
             }
         });
+    }
 
+    private void initArea1() {
+        mydriver=FirebaseDatabase.getInstance()
+                .getReference("driversAvailable")
+                .child(user1.getUid());
+        listener=this;
 
+        mydriver.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                List<MyLatLng1> latLngList1 = new ArrayList<>();
+                for (DataSnapshot locationSnapShot: dataSnapshot.getChildren()){
+                    MyLatLng1 latLng1 = locationSnapShot.getValue(MyLatLng1.class);
+                    latLngList1.add(latLng1);
+                }
+                listener.OnLoadLocationSuccess1(latLngList1);
+            }
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
 
-
-//        FirebaseDatabase.getInstance()
-//                .getReference("BusStopArea")
-//                .child("BusStop")
-//                .setValue(busStop)
-//                .addOnCompleteListener(new OnCompleteListener<Void>() {
-//                    @Override
-//                    public void onComplete(@NonNull Task<Void> task) {
-//                        Toast.makeText(MapsActivity.this,"Updated!",Toast.LENGTH_SHORT).show();
-//                    }
-//                }).addOnFailureListener(new OnFailureListener() {
-//            @Override
-//            public void onFailure(@NonNull Exception e) {
-//                Toast.makeText(MapsActivity.this,""+e.getMessage(),Toast.LENGTH_SHORT).show();
-//            }
-//        });
-
+            }
+        });
     }
 
     private void settingGeoFire() {
@@ -301,7 +288,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     return;
                 }
             }
-        assert fusedLocationProviderClient != null;
         fusedLocationProviderClient.requestLocationUpdates(locationRequest,locationCallback,Looper.myLooper());
 
         addCirleArea();
@@ -328,6 +314,10 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 // Setting the position of the marker
                 options.position(point);
 
+                /**
+                 * For the start location, the color of marker is GREEN and
+                 * for the end location, the color of marker is RED.
+                 */
                 if (MarkerPoints.size() == 1) {
                     options.icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)).title("Start");
                 } else if (MarkerPoints.size() == 2) {
@@ -347,7 +337,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             }
         });
 
-        Button btnDriving = findViewById(R.id.btnDriving);
+        Button btnDriving = (Button) findViewById(R.id.btnDriving);
         btnDriving.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -355,7 +345,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             }
         });
 
-        Button btnWalk = findViewById(R.id.btnWalk);
+        Button btnWalk = (Button) findViewById(R.id.btnWalk);
         btnWalk.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -379,7 +369,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         Call<Example> call = service.getDistanceDuration("metric", origin.latitude + "," + origin.longitude,dest.latitude + "," + dest.longitude, type);
 
         call.enqueue(new Callback<Example>() {
-            @SuppressLint("SetTextI18n")
             @Override
             public void onResponse(Response<Example> response, Retrofit retrofit) {
 
@@ -417,7 +406,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     }
 
     private List<LatLng> decodePoly(String encoded) {
-        List<LatLng> poly = new ArrayList<>();
+        List<LatLng> poly = new ArrayList<LatLng>();
         int index = 0, len = encoded.length();
         int lat = 0, lng = 0;
 
@@ -520,24 +509,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         super.onStop();
     }
 
+
     @Override
     public void onKeyEntered(String key, GeoLocation location) {
-
-//            final DatabaseReference ref = FirebaseDatabase.getInstance()
-//                    .getReference("BusStopArea")
-//                    .child("BusStop")
-//                    .child("Library");
-//            ref.addValueEventListener(new ValueEventListener() {
-//                @Override
-//                public void onDataChange(DataSnapshot dataSnapshot) {
-//                    //int count = (int) dataSnapshot.child("StudentNo").getValue();
-//                    ref.child("StudentNo").setValue(22);
-//                }
-//                @Override
-//                public void onCancelled(@NonNull DatabaseError databaseError) {
-//
-//                }
-//            });
 
         FirebaseDatabase.getInstance()
                 .getReference("BusStopArea")
@@ -561,6 +535,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     @Override
     public void onKeyExited(String key) {
+
         FirebaseDatabase.getInstance()
                 .getReference("BusStopArea")
                 .child("BusStop")
@@ -578,7 +553,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 Toast.makeText(MapsActivity.this,""+e.getMessage(),Toast.LENGTH_SHORT).show();
             }
         });
-        sendNotification("Jane",String.format("%s exited the bus stop area",key));
+
+        sendNotification("Wilson",String.format("%s exited the bus stop area",key));
     }
 
     @Override
@@ -612,7 +588,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             notificationChannel.setLightColor(Color.RED);
             notificationChannel.setVibrationPattern(new long [] {0,1000,500,1000});
             notificationChannel.enableVibration(true);
-            assert notificationManager != null;
             notificationManager.createNotificationChannel(notificationChannel);
         }
 
@@ -624,7 +599,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 .setLargeIcon(BitmapFactory.decodeResource(getResources(),R.mipmap.ic_launcher));
 
         Notification notification=builder.build();
-        assert notificationManager != null;
         notificationManager.notify(new Random().nextInt(),notification);
     }
 
@@ -640,7 +614,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
-        assert mapFragment != null;
         mapFragment.getMapAsync(MapsActivity.this);
 
         if (mMap!=null){
@@ -651,6 +624,42 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             addCirleArea();
         }
     }
+
+    @Override
+    public void OnLoadLocationSuccess1(List<MyLatLng1> latLngs) {
+        driver=new ArrayList<>();
+
+        for(MyLatLng1 myLatLng1:latLngs)
+        {
+            LatLng convert=new LatLng(myLatLng1.getLatitude(),myLatLng1.getLongitude());
+            driver.add(convert);
+        }
+
+        SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
+                .findFragmentById(R.id.map);
+        mapFragment.getMapAsync(MapsActivity.this);
+
+        if (mMap!=null){
+            mMap.clear();
+
+            geoFire.setLocation("Driver", new GeoLocation(lastLocation.getLatitude(),
+                    lastLocation.getLongitude()), new GeoFire.CompletionListener() {
+                @Override
+                public void onComplete(String key, DatabaseError error) {
+                    if(currentuser != null) currentuser.remove();
+                    currentuser = mMap.addMarker(new MarkerOptions()
+                            .position(new LatLng(lastLocation.getLatitude(),
+                                    lastLocation.getLongitude()))
+                            .title("Driver"));
+
+                    mMap.animateCamera(CameraUpdateFactory
+                            .newLatLngZoom(currentuser.getPosition(),17.5f));
+
+                }
+            });
+        }
+    }
+
 
     @Override
     public void OnLoadLocationFailed(String Message) {
